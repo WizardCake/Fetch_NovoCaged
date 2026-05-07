@@ -1,4 +1,4 @@
-# Novo CAGED Scraper and Wrangling Notes
+# Novo CAGED and RAIS Scraper and Wrangling Notes
 
 This project downloads and standardizes the public Novo CAGED microdata from:
 
