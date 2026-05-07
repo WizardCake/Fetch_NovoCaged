@@ -1,365 +1,162 @@
-# Novo CAGED and RAIS Scraper and Wrangling Notes
+# pdet-fetch
 
-This project downloads and standardizes the public Novo CAGED microdata from:
+Pipeline em Python para baixar, extrair, converter, agregar e integrar microdados públicos do Novo CAGED e da RAIS a partir do FTP do MTE/PDET.
 
-`ftp://ftp.mtps.gov.br/pdet/microdados/NOVO%20CAGED/`
+O projeto cobre três fluxos:
 
-The official MTE page says the microdata are TXT files using `;` as delimiter and UTF-8 encoding for Novo CAGED. The FTP folder also provides the layout workbook used below.
+- Novo CAGED mensal: arquivos `CAGEDMOV`, `CAGEDFOR` e `CAGEDEXC`.
+- RAIS anual consolidada: arquivos `VINC` e `ESTAB`, ignorando pastas parciais.
+- Integração RAIS + Novo CAGED: estoque anual da RAIS como base e saldos mensais do Novo CAGED como evolução.
 
-## Installation
-
-Install the package in editable mode (creates the `novo-caged`, `rais`, and `integra-rais-caged` CLI entry points):
+## Instalação
 
 ```powershell
 python -m pip install -e ".[dev]"
-```
-
-Run tests with:
-
-```powershell
 python -m pytest
 ```
 
-## Project Structure
+Dependências principais: `pandas` e `pyarrow`. A extração usa o comando `tar` disponível no sistema; no Windows, ele normalmente funciona com arquivos `.7z` quando o bsdtar/7-Zip está disponível no PATH.
 
-The code is organised as an installable Python package under `src/pdet/`:
-
-- `src/pdet/common.py`: shared FTP helpers, column sanitisation, code normalisation, retry logic, and logging.
-- `src/pdet/aggregation.py`: reusable aggregation pipeline (parse filters/measures, chunk aggregation, combine, and finalise).
-- `src/pdet/caged/`: Novo CAGED modules — `ftp.py`, `extract.py`, `convert.py`, `aggregate.py`, `cli.py`.
-- `src/pdet/rais/`: RAIS modules — `ftp.py`, `extract.py`, `convert.py`, `aggregate.py`, `cli.py`.
-- `src/pdet/integra/`: RAIS + CAGED integration modules — `core.py`, `cli.py`.
-- `novo_caged.py`, `rais.py`, `integra_rais_caged.py`: backward-compatible wrappers that call the new package.
-
-Legacy `pdet_common.py` has been refactored into `src/pdet/common.py` with full type hints, `logging` instead of `print()`, and FTP retry with exponential backoff.
-
-## Source Structure
-
-Top-level files inspected:
-
-- `Leia-me.txt`
-- `Layout Não-identificado Novo Caged Movimentação.xlsx`
-- `Sobre o Novo Caged.pdf`
-- `Comunicado - Grupamento de Atividades Econômicas.pdf`
-- Year folders: `2020` through `2026`
-
-Each monthly folder is named `AAAAMM`, for example `2026/202603/`.
-
-Archive types:
-
-- `CAGEDMOVAAAAMM.7z`: movements declared within the deadline for declaration competence `AAAAMM`.
-- `CAGEDFORAAAAMM.7z`: late declarations with declaration competence `AAAAMM`.
-- `CAGEDEXCAAAAMM.7z`: exclusions with exclusion declaration competence `AAAAMM`.
-
-Early months may not contain all three archive types. For example, `202001` currently has only `CAGEDMOV202001.7z`.
-
-## Commands
-
-All examples below use the backward-compatible wrapper files (`python novo_caged.py …`).
-If you installed the package with `pip install -e .`, you can also call the entry points directly:
-`novo-caged`, `rais`, and `integra-rais-caged`.
-
-### Simplified Pipeline (Recommended)
-
-`convert` now **automatically extracts** `.7z` archives if no TXTs are found in `data/extracted/`.  
-This lets you skip the separate `extract` step:
+Os comandos podem ser chamados pelos scripts de compatibilidade:
 
 ```powershell
-# 1. Download
-python novo_caged.py download --start 202603 --end 202603 --kinds MOV FOR EXC
-
-# 2. Convert (extracts + converts in one step)
-python novo_caged.py convert --output-format parquet
-
-# 3. Aggregate
-python novo_caged.py aggregate `
-  --dimensions competencia_mov municipio `
-  --measures saldo estoque admitidos demitidos `
-  --filter uf=33 `
-  --output data\exports\rj_municipios.csv
+python novo_caged.py --help
+python rais.py --help
+python integra_rais_caged.py --help
 ```
 
-To save disk space, remove the intermediate TXTs after conversion:
+Após `pip install -e .`, também ficam disponíveis os entry points:
 
 ```powershell
-python novo_caged.py convert --output-format parquet --cleanup
+novo-caged --help
+rais --help
+integra-rais-caged --help
 ```
 
-The `--cleanup` flag deletes `.txt` files from `data/extracted/` after they are successfully converted.  
-The original `.7z` archives in `data/raw/` are always preserved.
+## Estrutura
 
-### Legacy Step-by-Step Pipeline
+```text
+src/pdet/
+  common.py              # FTP, extração, normalização e utilitários comuns
+  aggregation.py         # pipeline genérico de filtros, medidas e agregações
+  caged/                 # Novo CAGED: FTP, extração, conversão, agregação e CLI
+  rais/                  # RAIS: FTP, extração, conversão, agregação e CLI
+  integra/               # integração de estoque RAIS com fluxo Novo CAGED
+tests/                   # testes unitários
+docs/                    # leia-me e layout oficial do Novo CAGED
+NT/                      # PDFs técnicos da RAIS
+```
 
-If you need to inspect the raw TXT files, the separate `extract` command still works:
+Os dados gerados ficam fora do versionamento:
+
+```text
+data/
+  raw/                   # .7z do Novo CAGED
+  extracted/             # TXT extraído do Novo CAGED
+  parquet/ ou csv/       # Novo CAGED convertido
+  exports/               # agregados e integrações
+  rais/
+    raw/
+    extracted/
+    parquet/subset=.../
+    csv/subset=.../
+    exports/
+```
+
+## Novo CAGED
+
+Fonte FTP: `/pdet/microdados/NOVO CAGED`.
+
+Fluxo recomendado:
 
 ```powershell
 python novo_caged.py list --start 202603 --end 202603
 python novo_caged.py download --start 202603 --end 202603 --kinds MOV FOR EXC
-python novo_caged.py extract
-python novo_caged.py convert --output-format parquet
+python novo_caged.py convert --output-format parquet --cleanup
+python novo_caged.py aggregate `
+  --dimensions competencia_mov municipio `
+  --measures saldo admitidos demitidos `
+  --filter uf=33 `
+  --output data\exports\caged_rj_municipios.csv
+```
+
+Observações:
+
+- `convert` extrai automaticamente os `.7z` se não houver TXT em `data/extracted/`.
+- `--cleanup` remove apenas os TXT extraídos; os `.7z` em `data/raw/` são preservados.
+- `aggregate` lê automaticamente Parquet, depois CSV, depois TXT.
+- Medidas nativas: `saldo`, `admitidos`, `demitidos`, `estoque`, `movimentacoes`.
+- Medidas numéricas genéricas seguem `sum:coluna`, `mean:coluna`, `min:coluna` ou `max:coluna`.
+
+Exemplo com estoque acumulado:
+
+```powershell
 python novo_caged.py aggregate `
   --dimensions competencia_mov municipio `
   --measures saldo estoque admitidos demitidos `
   --filter uf=33 `
-  --output data\exports\rj_municipios.csv
+  --output data\exports\caged_rj_municipios_estoque.csv
 ```
 
-The aggregation command accepts any standardized column in `--dimensions`, and any number of filters with `--filter coluna=valor1,valor2`.
+Sem `--initial-stock-csv`, `estoque` é o saldo acumulado a partir do primeiro mês selecionado, não o estoque absoluto.
 
-## RAIS Annual Flow
+## RAIS
 
-The RAIS scraper is in `rais.py` and uses the annual consolidated FTP folders from:
+Fonte FTP: `/pdet/microdados/RAIS`.
 
-`ftp://ftp.mtps.gov.br/pdet/microdados/RAIS/`
-
-Consolidated folders are exactly `AAAA`. Folders such as `2023 Parcial` and `2024 Parcial` are intentionally ignored by the code and should not be used.
-
-Default RJ 2024 pipeline:
+A CLI usa por padrão a RAIS consolidada de 2024, arquivo `VINC`, filtrada para RJ (`uf=33`):
 
 ```powershell
 python rais.py rj-2024
 ```
 
-This downloads only the consolidated 2024 VINC archive that covers RJ (`RAIS_VINC_PUB_MG_ES_RJ.7z`), extracts it, converts a filtered `uf=33` subset, and writes:
+Saída padrão:
 
 ```text
 data\rais\exports\rj_municipios_2024.csv
 ```
 
-Simplified step-by-step commands (`convert` auto-extracts):
+Fluxo equivalente, passo a passo:
 
 ```powershell
-python rais.py list
-python rais.py download
-python rais.py convert --cleanup
-python rais.py aggregate
+python rais.py list --start-year 2024 --end-year 2024
+python rais.py download --start-year 2024 --end-year 2024
+python rais.py convert --start-year 2024 --end-year 2024 --cleanup
+python rais.py aggregate --start-year 2024 --end-year 2024 `
+  --output data\rais\exports\rais_rj_municipios.csv
 ```
 
-Useful options:
+Observações:
 
-- `--uf all` on `list` or `download` disables the default RJ archive selection.
-- `--all-ufs` on `convert` or `aggregate` disables the default `uf=33` row filter.
-- `--start-year` and `--end-year` default to `2024` and only accept consolidated `AAAA` folders.
-- `--encoding` defaults to `latin-1`, which matches the historical RAIS TXT files.
+- Apenas pastas consolidadas `AAAA` são consideradas; pastas como `2024 Parcial` são ignoradas.
+- `convert` também autoextrai quando só existem `.7z` em `data/rais/raw/`.
+- O filtro padrão é `uf=33`, gravado no subset `uf_33`.
+- Use `--all-ufs` para remover o filtro padrão.
+- Ao criar um subset customizado, use o mesmo `--subset-name` no `convert` e no `aggregate`.
+- A codificação padrão da RAIS é `latin-1`.
 
-RAIS aggregation is stock-oriented, not monthly movement-oriented. Built-in measures are:
+Medidas nativas da RAIS:
 
-- `estoque_3112`: links active on 31/12, using `vinculo_ativo_31_12` when present.
-- `vinculos`: all rows in the annual VINC file after filters.
-- `admitidos_ano`: rows with admission month in the year.
-- `desligados_ano`: rows with dismissal month in the year.
+- `estoque_3112`: vínculos ativos em 31/12.
+- `vinculos`: total de linhas após filtros.
+- `admitidos_ano`: vínculos com mês de admissão preenchido.
+- `desligados_ano`: vínculos com mês de desligamento preenchido.
 
-Generic numeric measures follow the CAGED CLI style, for example:
+Exemplo com dimensão adicional e média salarial:
 
 ```powershell
 python rais.py aggregate `
   --dimensions ano municipio sexo `
-  --measures estoque_3112 mean:remuneracao_media_nominal `
-  --output data\rais\exports\rj_municipios_sexo_2024.csv
+  --measures estoque_3112 vinculos mean:remuneracao_media_nominal `
+  --output data\rais\exports\rais_rj_municipios_sexo.csv
 ```
 
-## RAIS + Novo CAGED Integrated Stock
+## Integração RAIS + Novo CAGED
 
-Use `integra_rais_caged.py` after generating:
+Use a integração depois de gerar:
 
-- RAIS annual municipal stock, for example `data\rais\exports\rj_municipios_2024.csv`.
-- Novo CAGED monthly municipal flows, for example `data\exports\rj_municipios.csv`.
-
-Command:
-
-```powershell
-python integra_rais_caged.py
-```
-
-The integrated file is written to:
-
-```text
-data\exports\rj_municipios_rais_caged.csv
-```
-
-Integration rule:
-
-- RAIS stock for year `t` (`estoque_3112`) is used as the starting stock for the first available Novo CAGED month in year `t+1`.
-- If Novo CAGED has a newer year but the matching RAIS year is not available yet, stock continues from the previous month's `estoque_fim`.
-- When the newer RAIS is later added, the first month of the matching CAGED year is recalculated from that newer RAIS stock.
-- For each month: `estoque_fim = estoque_inicio + saldo`.
-- The next month's `estoque_inicio` is the previous month's `estoque_fim`.
-- Months without a CAGED row for a municipality are kept in the grid with zero flow.
-
-Column naming:
-
-- RAIS `admitidos_ano` becomes `admitidos_rais_ano`.
-- RAIS `desligados_ano` becomes `desligados_rais_ano`.
-- Novo CAGED `admitidos` becomes `admitidos_novo_caged`.
-- Novo CAGED `demitidos` becomes `demitidos_novo_caged`.
-
-## Python Dependencies
-
-The download and extract steps use only the Python standard library plus the system `tar` command. On this machine, `tar` is available and can extract `.7z`.
-
-The convert step needs `pandas` and `pyarrow` (declared in `pyproject.toml`):
-
-```powershell
-python -m pip install -e "."
-```
-
-Use `pandas` only after extraction; do not load the `.7z` archives directly into memory.
-
-## Layout
-
-The movement layout workbook lists these columns:
-
-| Raw column | Standard column | Notes |
-| --- | --- | --- |
-| `competênciamov` | `competencia_mov` | Movement competence, `AAAAMM`. Use this for the labor-market month. |
-| `região` | `regiao` | IBGE region code. |
-| `uf` | `uf` | IBGE state code. |
-| `município` | `municipio` | Municipality code. |
-| `seção` | `secao` | CNAE 2.0 section. |
-| `subclasse` | `subclasse` | CNAE 2.0 subclass. |
-| `saldomovimentação` | `saldo_movimentacao` | Signed movement impact, normally `1` or `-1`. |
-| `categoria` | `categoria` | Worker category. |
-| `cbo2002ocupação` | `cbo2002_ocupacao` | CBO 2002 occupation. |
-| `graudeinstrução` | `grau_de_instrucao` | Education level. |
-| `idade` | `idade` | Worker age. |
-| `horascontratuais` | `horascontratuais` | Weekly contracted hours, decimal comma in TXT. |
-| `raçacor` | `raca_cor` | Race/color code. |
-| `sexo` | `sexo` | Sex code. |
-| `tipoempregador` | `tipoempregador` | Employer type. |
-| `tipoestabelecimento` | `tipoestabelecimento` | Establishment type. |
-| `tipomovimentação` | `tipomovimentacao` | Movement type. |
-| `tipodedeficiência` | `tipodedeficiencia` | Disability type. |
-| `indtrabintermitente` | `indtrabintermitente` | Intermittent worker flag. |
-| `indtrabparcial` | `indtrabparcial` | Part-time worker flag. |
-| `salário` | `salario` | Monthly declared salary, decimal comma in TXT. |
-| `tamestabjan` | `tamestabjan` | Establishment employment-size band in January. |
-| `indicadoraprendiz` | `indicadoraprendiz` | Apprentice flag. |
-| `origemdainformação` | `origem_da_informacao` | Data origin. |
-| `competênciadec` | `competencia_dec` | Declaration competence. |
-| `competênciaexc` | `competencia_exc` | Exclusion competence; present in `EXC`. |
-| `indicadordeexclusão` | `indicador_de_exclusao` | Exclusion flag; present in `EXC`. |
-| `indicadordeforadoprazo` | `indicador_de_fora_do_prazo` | Late-declaration flag. |
-| `unidadesaláriocódigo` | `unidade_salario_codigo` | Salary payment unit. |
-| `valorsaláriofixo` | `valor_salario_fixo` | Fixed salary amount, decimal comma in TXT. |
-
-The script also adds:
-
-- `source_competencia`: month of the downloaded archive folder.
-- `source_kind`: `MOV`, `FOR`, or `EXC`.
-
-## Wrangling Rules
-
-Read TXT with:
-
-```python
-pd.read_csv(path, sep=";", encoding="utf-8", decimal=",", dtype="string")
-```
-
-Then convert only true measures to numeric:
-
-- Integers: `saldo_movimentacao`, `idade`
-- Decimals: `horascontratuais`, `salario`, `valor_salario_fixo`
-- Keep codes as strings, including `uf`, `municipio`, `subclasse`, `cbo2002_ocupacao`, `categoria`, and every flag/dictionary field.
-
-Unify the schemas:
-
-- `MOV` and `FOR` do not have `competencia_exc` or `indicador_de_exclusao`; add them as nulls.
-- `EXC` has those columns and should remain in the same fact table.
-- Add `source_kind` before stacking the files so you can audit whether a row came from in-deadline, late, or exclusion files.
-
-Aggregation:
-
-- For net job balance, use `saldo_movimentacao` for `MOV`/`FOR` and invert it for `EXC`, because exclusions cancel the original event.
-- `admitidos` and `demitidos` are adjusted counts: regular/late declarations add `1`; exclusions subtract `1` from the original admission or dismissal type.
-- For a revised time series, group by `competencia_mov`, not by `source_competencia`.
-- For publication/release auditing, group by `source_competencia` and `source_kind`.
-- `estoque` is not directly available in the movement microdata. The script computes it as cumulative corrected `saldo` by `competencia_mov` within the selected dimensions. Pass `--initial-stock-csv` if you need absolute stock instead of accumulated variation from the first selected month.
-
-Example:
-
-```python
-df["sinal_correcao"] = df["source_kind"].eq("EXC").map({True: -1, False: 1})
-df["saldo_corrigido"] = df["saldo_movimentacao"] * df["sinal_correcao"]
-saldo_por_mes_uf = df.groupby(["competencia_mov", "uf"], as_index=False)["saldo_corrigido"].sum()
-```
-
-CLI examples:
-
-```powershell
-# Rio de Janeiro municipalities, every available movement month in the local data
-python novo_caged.py aggregate `
-  --dimensions competencia_mov municipio `
-  --measures saldo estoque admitidos demitidos `
-  --filter uf=33 `
-  --output data\exports\rj_municipios.csv
-
-# Same idea, but split by CNAE section too
-python novo_caged.py aggregate `
-  --dimensions competencia_mov municipio secao `
-  --measures saldo admitidos demitidos mean:salario `
-  --filter uf=33 `
-  --output data\exports\rj_municipios_secao.csv
-
-# Filter more than one value
-python novo_caged.py aggregate `
-  --dimensions competencia_mov uf sexo `
-  --measures saldo admitidos demitidos `
-  --filter uf=33,35 `
-  --output data\exports\rj_sp_por_sexo.csv
-```
-
-Use Parquet for the cleaned layer because monthly `MOV` files are large. A good local lake layout is:
-
-```text
-data/
-  raw/AAAAMM/*.7z
-  extracted/AAAAMM/*.txt
-  parquet/source_competencia=AAAAMM/source_kind=MOV/*.parquet
-```
-
-## Data Quality Checks
-
-Run these checks after conversion:
-
-- Row count by `source_competencia` and `source_kind`.
-- Null/unknown rates for key dimensions: `cbo2002_ocupacao`, `municipio`, `subclasse`, `salario`.
-- `saldo_movimentacao` values should be signed integers.
-- The latest official correction notice says files up to February 2023 were replaced, but movement counts were not changed; re-download old files instead of relying on stale local copies.
-
-## End-to-End Example
-
-Example for multiple RAIS base years and all available Novo CAGED months.
-
-Novo CAGED (convert auto-extracts and optionally cleans up TXTs):
-
-```powershell
-python novo_caged.py download --start 202001 --end 202612 --kinds MOV FOR EXC
-python novo_caged.py convert --output-format parquet --cleanup
-python novo_caged.py aggregate `
-  --dimensions competencia_mov municipio `
-  --measures saldo admitidos demitidos `
-  --filter uf=33 `
-  --start-mov 202001 `
-  --end-mov 202612 `
-  --output data\exports\caged_rj_municipios.csv
-```
-
-RAIS (convert auto-extracts):
-
-```powershell
-python rais.py download --start-year 2019 --end-year 2026
-python rais.py convert --start-year 2019 --end-year 2026 --cleanup
-python rais.py aggregate --start-year 2019 --end-year 2026 `
-  --output data\rais\exports\rais_rj_municipios.csv
-```
-
-The RAIS commands use only consolidated `AAAA` folders. Folders such as `2024 Parcial` are ignored.
-
-```text
-data\rais\exports\rais_rj_municipios.csv
-```
-
-Integration:
+- um agregado anual da RAIS com `ano`, `municipio` e `estoque_3112`;
+- um agregado mensal do Novo CAGED com `competencia_mov`, `municipio`, `saldo`, `admitidos` e `demitidos`.
 
 ```powershell
 python integra_rais_caged.py `
@@ -368,4 +165,25 @@ python integra_rais_caged.py `
   --output data\exports\rj_municipios_complete.csv
 ```
 
-The integrated output resets January stock from RAIS when the matching previous RAIS year exists. For newer Novo CAGED months without a matching RAIS year yet, it continues from the previous month's `estoque_fim`.
+Regra usada:
+
+- RAIS do ano `t` vira base para o primeiro mês disponível do Novo CAGED no ano `t+1`.
+- Se a RAIS mais recente ainda não existir, a série continua a partir do `estoque_fim` anterior.
+- Para cada mês: `estoque_fim = estoque_inicio + saldo`.
+- Meses sem linha do Novo CAGED para um município entram com fluxo zero.
+
+## Regras de tratamento
+
+- Colunas de código permanecem como texto (`uf`, `municipio`, `subclasse`, `cbo2002_ocupacao`, flags e dicionários).
+- Colunas de medida são convertidas para numérico somente quando necessário.
+- No Novo CAGED, registros `EXC` invertem o sinal do movimento para corrigir exclusões.
+- Para séries revisadas do Novo CAGED, agregue por `competencia_mov`; `source_competencia` serve para auditoria da competência do arquivo baixado.
+- A RAIS é anual e orientada a estoque; o Novo CAGED é mensal e orientado a movimento.
+
+## Testes
+
+```powershell
+python -m pytest
+```
+
+Os testes cobrem normalização de colunas, filtros, medidas, conversão, agregação e integração RAIS + Novo CAGED.
