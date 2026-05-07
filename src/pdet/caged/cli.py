@@ -9,7 +9,7 @@ from pathlib import Path
 from pdet.aggregation import parse_filters, parse_measures, validate_dimensions
 from pdet.caged.aggregate import aggregate_data
 from pdet.caged.columns import ALL_COLUMNS, BUILTIN_MEASURES, NUMERIC_COLUMNS
-from pdet.caged.convert import convert_txt
+from pdet.caged.convert import convert_txt, run_convert
 from pdet.caged.extract import extract_archive
 from pdet.caged.ftp import ARCHIVE_KINDS, available_months, download_archive, list_archives
 from pdet.common import connect_ftp, select_period_range
@@ -54,10 +54,13 @@ def cmd_extract(args: argparse.Namespace) -> None:
 
 
 def cmd_convert(args: argparse.Namespace) -> None:
-    output_dir = args.data_dir / args.output_format
-    txt_files = sorted((args.data_dir / "extracted").glob("**/CAGED*.txt"))
-    for txt_path in txt_files:
-        convert_txt(txt_path, output_dir, args.output_format, args.chunksize, args.overwrite)
+    run_convert(
+        data_dir=args.data_dir,
+        output_format=args.output_format,
+        chunksize=args.chunksize,
+        overwrite=args.overwrite,
+        cleanup=args.cleanup,
+    )
 
 
 def cmd_aggregate(args: argparse.Namespace) -> None:
@@ -110,6 +113,11 @@ def build_parser() -> argparse.ArgumentParser:
     convert_parser.add_argument("--output-format", choices=("parquet", "csv"), default="parquet")
     convert_parser.add_argument("--chunksize", type=int, default=500_000)
     convert_parser.add_argument("--overwrite", action="store_true")
+    convert_parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove extracted TXT files after successful conversion to save disk space.",
+    )
     convert_parser.set_defaults(func=cmd_convert)
 
     aggregate_parser = subparsers.add_parser("aggregate", help="Aggregate standardized Novo CAGED files to CSV.")

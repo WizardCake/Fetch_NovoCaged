@@ -4,7 +4,14 @@ import pandas as pd
 import pytest
 
 from pdet.rais.columns import CANONICAL_RENAMES, STANDARD_COLUMNS, BUILTIN_MEASURES
-from pdet.rais.convert import canonical_column, normalize_columns, add_source_and_derived_columns, coerce_known_types
+from pdet.rais.convert import (
+    canonical_column,
+    normalize_columns,
+    add_source_and_derived_columns,
+    coerce_known_types,
+    find_or_extract_txt,
+    run_convert,
+)
 from pdet.rais.aggregate import active_3112_mask, month_present_mask, add_metric_columns
 from pdet.aggregation import parse_filters, parse_measures
 
@@ -116,3 +123,37 @@ class TestAddMetricColumnsRais:
         assert "_mean_remuneracao_media_nominal_sum" in result.columns
         assert "_mean_remuneracao_media_nominal_count" in result.columns
         assert result["_mean_remuneracao_media_nominal_count"].sum() == 2
+
+
+class TestFindOrExtractTxtRais:
+    def test_returns_existing_txts(self, tmp_path):
+        extracted = tmp_path / "extracted" / "2024" / "RAIS_VINC"
+        extracted.mkdir(parents=True)
+        txt = extracted / "RAIS_VINC.txt"
+        txt.write_text("Ano;Municipio\n2024;330455\n", encoding="utf-8")
+        result = find_or_extract_txt(tmp_path, overwrite=False)
+        assert len(result) == 1
+        assert result[0] == txt
+
+    def test_raises_when_no_raw(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="No raw"):
+            find_or_extract_txt(tmp_path, overwrite=False)
+
+
+class TestRunConvertRais:
+    def test_converts_existing_txts(self, tmp_path):
+        extracted = tmp_path / "extracted" / "2024" / "RAIS_VINC"
+        extracted.mkdir(parents=True)
+        txt = extracted / "RAIS_VINC.txt"
+        txt.write_text("Ano;Municipio\n2024;330455\n", encoding="utf-8")
+        run_convert(tmp_path, "parquet", 1000, True, {}, "latin-1", False)
+        parquet_files = list((tmp_path / "parquet").rglob("*.parquet"))
+        assert len(parquet_files) == 1
+
+    def test_cleanup_removes_txts(self, tmp_path):
+        extracted = tmp_path / "extracted" / "2024" / "RAIS_VINC"
+        extracted.mkdir(parents=True)
+        txt = extracted / "RAIS_VINC.txt"
+        txt.write_text("Ano;Municipio\n2024;330455\n", encoding="utf-8")
+        run_convert(tmp_path, "parquet", 1000, True, {}, "latin-1", True)
+        assert not txt.exists()

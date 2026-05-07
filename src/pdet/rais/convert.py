@@ -1,4 +1,4 @@
-"""TXT-to-Parquet/CSV conversion and column normalization for RAIS."""
+"""TXT-to-Parquet/CSV conversion and column normalization for RAIS, with automatic extraction."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from pdet.rais.columns import (
     INTEGER_COLUMNS,
     STANDARD_COLUMNS,
 )
-from pdet.rais.extract import iter_microdata_text_files
+from pdet.rais.extract import extract_archive, iter_microdata_text_files
 from pdet.rais.ftp import archive_kind
 
 logger = logging.getLogger(__name__)
@@ -197,3 +197,47 @@ def convert_txt(
     if not outputs:
         logger.info("no rows matched filters for: %s", txt_path)
     return outputs
+
+
+def find_or_extract_txt(data_dir: Path, overwrite: bool) -> list[Path]:
+    """Return already-extracted TXTs or extract missing ones from ``data/raw/**/*.7z``."""
+    txt_files = iter_microdata_text_files(data_dir / "extracted")
+    if txt_files:
+        logger.info("Found %d extracted TXT file(s)", len(txt_files))
+        return txt_files
+
+    archives = sorted((data_dir / "raw").glob("*/*.7z"))
+    if not archives:
+        raise FileNotFoundError(
+            f"No raw RAIS .7z archives found under {data_dir / 'raw'}. "
+            "Run `python rais.py download` first."
+        )
+
+    logger.info("No extracted TXTs found; extracting %d archive(s) from raw/", len(archives))
+    for archive in archives:
+        extract_archive(archive, data_dir, overwrite)
+
+    txt_files = iter_microdata_text_files(data_dir / "extracted")
+    if not txt_files:
+        raise RuntimeError("No TXT files found after extraction.")
+    return txt_files
+
+
+def run_convert(
+    data_dir: Path,
+    output_format: str,
+    chunksize: int,
+    overwrite: bool,
+    filters: dict[str, set[str]],
+    encoding: str,
+    cleanup: bool,
+) -> None:
+    """Extract if needed, convert all TXTs to Parquet/CSV, and optionally clean up TXTs."""
+    output_dir = data_dir / output_format
+    txt_files = find_or_extract_txt(data_dir, overwrite)
+
+    for txt_path in txt_files:
+        convert_txt(txt_path, output_dir, output_format, chunksize, overwrite, filters, encoding)
+        if cleanup:
+            txt_path.unlink()
+            logger.info("cleaned up: %s", txt_path)

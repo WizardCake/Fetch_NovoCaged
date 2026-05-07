@@ -59,39 +59,44 @@ All examples below use the backward-compatible wrapper files (`python novo_caged
 If you installed the package with `pip install -e .`, you can also call the entry points directly:
 `novo-caged`, `rais`, and `integra-rais-caged`.
 
-List available months and files:
+### Simplified Pipeline (Recommended)
+
+`convert` now **automatically extracts** `.7z` archives if no TXTs are found in `data/extracted/`.  
+This lets you skip the separate `extract` step:
+
+```powershell
+# 1. Download
+python novo_caged.py download --start 202603 --end 202603 --kinds MOV FOR EXC
+
+# 2. Convert (extracts + converts in one step)
+python novo_caged.py convert --output-format parquet
+
+# 3. Aggregate
+python novo_caged.py aggregate `
+  --dimensions competencia_mov municipio `
+  --measures saldo estoque admitidos demitidos `
+  --filter uf=33 `
+  --output data\exports\rj_municipios.csv
+```
+
+To save disk space, remove the intermediate TXTs after conversion:
+
+```powershell
+python novo_caged.py convert --output-format parquet --cleanup
+```
+
+The `--cleanup` flag deletes `.txt` files from `data/extracted/` after they are successfully converted.  
+The original `.7z` archives in `data/raw/` are always preserved.
+
+### Legacy Step-by-Step Pipeline
+
+If you need to inspect the raw TXT files, the separate `extract` command still works:
 
 ```powershell
 python novo_caged.py list --start 202603 --end 202603
-```
-
-Download one release month:
-
-```powershell
 python novo_caged.py download --start 202603 --end 202603 --kinds MOV FOR EXC
-```
-
-Extract downloaded `.7z` archives:
-
-```powershell
 python novo_caged.py extract
-```
-
-Convert extracted TXT to partitioned Parquet:
-
-```powershell
 python novo_caged.py convert --output-format parquet
-```
-
-If Parquet dependencies are not installed, convert to compressed CSV:
-
-```powershell
-python novo_caged.py convert --output-format csv
-```
-
-Aggregate standardized data to a final CSV:
-
-```powershell
 python novo_caged.py aggregate `
   --dimensions competencia_mov municipio `
   --measures saldo estoque admitidos demitidos `
@@ -121,13 +126,12 @@ This downloads only the consolidated 2024 VINC archive that covers RJ (`RAIS_VIN
 data\rais\exports\rj_municipios_2024.csv
 ```
 
-Equivalent step-by-step commands:
+Simplified step-by-step commands (`convert` auto-extracts):
 
 ```powershell
 python rais.py list
 python rais.py download
-python rais.py extract
-python rais.py convert
+python rais.py convert --cleanup
 python rais.py aggregate
 ```
 
@@ -326,12 +330,11 @@ Run these checks after conversion:
 
 Example for multiple RAIS base years and all available Novo CAGED months.
 
-Novo CAGED:
+Novo CAGED (convert auto-extracts and optionally cleans up TXTs):
 
 ```powershell
 python novo_caged.py download --start 202001 --end 202612 --kinds MOV FOR EXC
-python novo_caged.py extract
-python novo_caged.py convert --output-format parquet
+python novo_caged.py convert --output-format parquet --cleanup
 python novo_caged.py aggregate `
   --dimensions competencia_mov municipio `
   --measures saldo admitidos demitidos `
@@ -341,12 +344,11 @@ python novo_caged.py aggregate `
   --output data\exports\caged_rj_municipios.csv
 ```
 
-RAIS:
+RAIS (convert auto-extracts):
 
 ```powershell
 python rais.py download --start-year 2019 --end-year 2026
-python rais.py extract --start-year 2019 --end-year 2026
-python rais.py convert --start-year 2019 --end-year 2026
+python rais.py convert --start-year 2019 --end-year 2026 --cleanup
 python rais.py aggregate --start-year 2019 --end-year 2026 `
   --output data\rais\exports\rais_rj_municipios.csv
 ```

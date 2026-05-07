@@ -9,7 +9,7 @@ from pathlib import Path
 from pdet.aggregation import parse_filters, parse_measures
 from pdet.rais.aggregate import aggregate_data
 from pdet.rais.columns import BUILTIN_MEASURES, NUMERIC_COLUMNS, STANDARD_COLUMNS
-from pdet.rais.convert import convert_txt
+from pdet.rais.convert import convert_txt, run_convert
 from pdet.rais.extract import extract_archive, iter_microdata_text_files
 from pdet.rais.ftp import (
     ARCHIVE_KINDS,
@@ -128,25 +128,15 @@ def cmd_extract(args: argparse.Namespace) -> None:
 def cmd_convert(args: argparse.Namespace) -> None:
     filter_values = _default_rj_filters(args.filter, args.all_ufs)
     filters = parse_filters(filter_values, STANDARD_COLUMNS)
-    subset_name = args.subset_name or _subset_name_from_filters(filters)
-    output_dir = args.data_dir / args.output_format / f"subset={subset_name}"
-    txt_files = _filtered_txt_files(args.data_dir, args.start_year, args.end_year)
-    if not txt_files:
-        raise FileNotFoundError(
-            f"No extracted RAIS text files found under {args.data_dir / 'extracted'} for "
-            f"{args.start_year}-{args.end_year}. Run `python rais.py extract --start-year "
-            f"{args.start_year} --end-year {args.end_year}` first."
-        )
-    for txt_path in txt_files:
-        convert_txt(
-            txt_path=txt_path,
-            output_dir=output_dir,
-            output_format=args.output_format,
-            chunksize=args.chunksize,
-            overwrite=args.overwrite,
-            filters=filters,
-            encoding=args.encoding,
-        )
+    run_convert(
+        data_dir=args.data_dir,
+        output_format=args.output_format,
+        chunksize=args.chunksize,
+        overwrite=args.overwrite,
+        filters=filters,
+        encoding=args.encoding,
+        cleanup=args.cleanup,
+    )
 
 
 def cmd_aggregate(args: argparse.Namespace) -> None:
@@ -188,20 +178,15 @@ def cmd_rj_2024(args: argparse.Namespace) -> None:
         for archive in archives:
             archive_paths.append(download_archive(ftp, archive, args.data_dir, args.overwrite))
 
-    for archive_path in archive_paths:
-        txt_files.extend(extract_archive(archive_path, args.data_dir, args.overwrite))
-
-    output_dir = args.data_dir / args.output_format / f"subset={DEFAULT_SUBSET}"
-    for txt_path in txt_files:
-        convert_txt(
-            txt_path=txt_path,
-            output_dir=output_dir,
-            output_format=args.output_format,
-            chunksize=args.chunksize,
-            overwrite=args.overwrite,
-            filters=filters,
-            encoding=args.encoding,
-        )
+    run_convert(
+        data_dir=args.data_dir,
+        output_format=args.output_format,
+        chunksize=args.chunksize,
+        overwrite=args.overwrite,
+        filters=filters,
+        encoding=args.encoding,
+        cleanup=False,
+    )
 
     dimensions = ["ano", "municipio"]
     measures = parse_measures(
@@ -271,6 +256,11 @@ def build_parser() -> argparse.ArgumentParser:
     convert_parser.add_argument("--encoding", default=DEFAULT_TEXT_ENCODING)
     convert_parser.add_argument("--chunksize", type=int, default=500_000)
     convert_parser.add_argument("--overwrite", action="store_true")
+    convert_parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove extracted TXT files after successful conversion to save disk space.",
+    )
     convert_parser.set_defaults(func=cmd_convert)
 
     aggregate_parser = subparsers.add_parser("aggregate", help="Aggregate standardized RAIS files to CSV.")

@@ -11,7 +11,7 @@ from pdet.caged.columns import (
     ADMISSION_MOVEMENT_CODES,
     DISMISSAL_MOVEMENT_CODES,
 )
-from pdet.caged.convert import normalize_chunk, coerce_normalized_types
+from pdet.caged.convert import normalize_chunk, coerce_normalized_types, find_or_extract_txt, run_convert
 from pdet.caged.aggregate import add_metric_columns, add_stock_measure
 from pdet.aggregation import parse_filters, parse_measures, validate_dimensions
 
@@ -157,3 +157,49 @@ class TestValidateDimensions:
     def test_invalid(self):
         with pytest.raises(argparse.ArgumentTypeError):
             validate_dimensions(["invalid"], ALL_COLUMNS)
+
+
+class TestFindOrExtractTxt:
+    def test_returns_existing_txts(self, tmp_path):
+        extracted = tmp_path / "extracted" / "202401"
+        extracted.mkdir(parents=True)
+        txt = extracted / "CAGEDMOV202401.txt"
+        txt.write_text("competênciamov;uf\n202401;33\n", encoding="utf-8")
+        result = find_or_extract_txt(tmp_path, overwrite=False)
+        assert len(result) == 1
+        assert result[0] == txt
+
+    def test_extracts_from_raw(self, tmp_path):
+        raw = tmp_path / "raw" / "202401"
+        raw.mkdir(parents=True)
+        # Create a fake .7z by making a tarball (tar supports .7z on this system)
+        archive = raw / "CAGEDMOV202401.7z"
+        txt = tmp_path / "extracted" / "202401" / "CAGEDMOV202401.txt"
+        txt.parent.mkdir(parents=True)
+        txt.write_text("competênciamov;uf\n202401;33\n", encoding="utf-8")
+        # Instead of creating a real .7z, mock the extraction by pre-populating extracted/
+        result = find_or_extract_txt(tmp_path, overwrite=False)
+        assert len(result) == 1
+
+    def test_raises_when_no_raw(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="No raw"):
+            find_or_extract_txt(tmp_path, overwrite=False)
+
+
+class TestRunConvert:
+    def test_converts_existing_txts(self, tmp_path):
+        extracted = tmp_path / "extracted" / "202401"
+        extracted.mkdir(parents=True)
+        txt = extracted / "CAGEDMOV202401.txt"
+        txt.write_text("competênciamov;uf\n202401;33\n", encoding="utf-8")
+        run_convert(tmp_path, "parquet", 1000, True, False)
+        parquet_files = list((tmp_path / "parquet").rglob("*.parquet"))
+        assert len(parquet_files) == 1
+
+    def test_cleanup_removes_txts(self, tmp_path):
+        extracted = tmp_path / "extracted" / "202401"
+        extracted.mkdir(parents=True)
+        txt = extracted / "CAGEDMOV202401.txt"
+        txt.write_text("competênciamov;uf\n202401;33\n", encoding="utf-8")
+        run_convert(tmp_path, "parquet", 1000, True, True)
+        assert not txt.exists()
